@@ -1,9 +1,16 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { parseKnowledge } from './utils/parseKnowledge'
 import knowledgeMd from './data/knowledge.md?raw'
 import './index.css'
+
+const PROGRESS_KEY = 'aws-progress'
+const LAST_MOD_KEY = 'aws-last-module'
+
+function loadProgress() {
+  try { return JSON.parse(localStorage.getItem(PROGRESS_KEY) || '{}') } catch { return {} }
+}
 
 function App() {
   const [modules, setModules] = useState([])
@@ -12,7 +19,10 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light')
   const [search, setSearch] = useState('')
+  const [viewed, setViewed] = useState(loadProgress)
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const contentRef = useRef(null)
+  const secRefs = useRef({})
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -26,11 +36,18 @@ function App() {
   useEffect(() => {
     const parsed = parseKnowledge(knowledgeMd)
     setModules(parsed)
+    const lastId = localStorage.getItem(LAST_MOD_KEY)
+    if (lastId) {
+      const m = parsed.find(p => p.id === lastId)
+      if (m) { setActiveModule(m); setActiveSection(m.sections[0]?.id || null) }
+    }
   }, [])
 
   const totalSections = modules.reduce((acc, m) => acc + m.sections.length, 0)
   const moduleIndex = activeModule ? modules.findIndex(m => m.id === activeModule.id) : -1
   const progress = activeModule ? Math.round(((moduleIndex + 1) / modules.length) * 100) : 0
+  const viewedCount = Object.keys(viewed).length
+  const totalViewedPct = totalSections ? Math.round((viewedCount / totalSections) * 100) : 0
 
   const filteredModules = useMemo(() => {
     if (!search.trim()) return modules
@@ -41,17 +58,34 @@ function App() {
     )
   }, [modules, search])
 
+  const s3Modules = useMemo(() => {
+    return filteredModules.filter(m => /^Módulo (?:07|08|09|10|11|12|13|14|15|16|17|18|19)/.test(m.title))
+  }, [filteredModules])
+
+  const otherModules = useMemo(() => {
+    return filteredModules.filter(m => !/^Módulo (?:07|08|09|10|11|12|13|14|15|16|17|18|19)/.test(m.title))
+  }, [filteredModules])
+
+  function markViewed(secId) {
+    if (viewed[secId]) return
+    const next = { ...viewed, [secId]: true }
+    setViewed(next)
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify(next))
+  }
+
   function openModule(mod) {
     setSearch('')
     setActiveModule(mod)
     setActiveSection(mod.sections[0]?.id || null)
     setSidebarOpen(false)
+    localStorage.setItem(LAST_MOD_KEY, mod.id)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   function goToSection(secId) {
     setActiveSection(secId)
     setSidebarOpen(false)
+    markViewed(secId)
     const el = document.getElementById('sec-' + secId)
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
@@ -69,6 +103,8 @@ function App() {
 
   useEffect(() => {
     function handleKey(e) {
+      if (paletteOpen) return
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); setPaletteOpen(true); return }
       if (!activeModule) return
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return
       if (e.key === 'ArrowLeft' && prevModule) { openModule(prevModule); e.preventDefault() }
@@ -76,7 +112,9 @@ function App() {
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [activeModule, prevModule, nextModule])
+  }, [activeModule, prevModule, nextModule, paletteOpen])
+
+  const currentSections = activeModule?.sections || []
 
   return (
     <div className="app-layout">
@@ -89,6 +127,7 @@ function App() {
         <div className="header-sep" />
         <span className="header-subtitle">AWS SAA-C03</span>
         <div className="header-right">
+          <button className="palette-btn" onClick={() => setPaletteOpen(true)} title="Buscar (⌘K)">⌘K</button>
           <button className="theme-btn" onClick={toggleTheme} title="Alternar tema">{theme === 'light' ? '🌙' : '☀️'}</button>
           <span className="aws-badge">☁ SAA-C03</span>
           <button className="back-hub-btn" onClick={() => window.location.href = 'https://hugosergio.com.br/guide/'}>← Guia Hub</button>
@@ -102,10 +141,12 @@ function App() {
           <div className="sidebar-inner">
             <div className="progress-wrap">
               <div className="progress-label">
-                {activeModule ? `Módulo ${moduleIndex + 1}/${modules.length} · ${progress}%` : `${modules.length} módulos`}
+                {activeModule
+                  ? `Módulo ${moduleIndex + 1}/${modules.length} · ${progress}%`
+                  : `${viewedCount}/${totalSections} tópicos vistos (${totalViewedPct}%)`}
               </div>
               <div className="progress-bar">
-                <div className="progress-fill" style={{ width: progress + '%' }} />
+                <div className="progress-fill" style={{ width: activeModule ? progress + '%' : totalViewedPct + '%' }} />
               </div>
             </div>
 
@@ -128,33 +169,15 @@ function App() {
               </div>
             </button>
 
-            {filteredModules.map((mod, i) => {
+            {otherModules.length > 0 && otherModules.map((mod, i) => {
               const isActive = activeModule?.id === mod.id
               const realIndex = modules.findIndex(m => m.id === mod.id)
-              return (
-                <div key={mod.id}>
-                  <button className="mod-btn" onClick={() => openModule(mod)}>
-                    <div className={`mod-header ${isActive ? 'active' : ''}`}>
-                      <span className="mod-num">{String(realIndex + 1).padStart(2, '0')}</span>
-                      <span className="mod-title">{mod.title.replace(/Módulo \d+: /, '')}</span>
-                    </div>
-                  </button>
-                  {isActive && mod.sections.length > 0 && (
-                    <div className="sec-list">
-                      {mod.sections.map(sec => (
-                        <button
-                          key={sec.id}
-                          className={`sec-btn ${activeSection === sec.id ? 'active' : ''}`}
-                          onClick={() => goToSection(sec.id)}
-                        >
-                          {sec.title}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )
+              return <ModuleItem key={mod.id} mod={mod} realIndex={realIndex} isActive={isActive} activeSection={activeSection} onOpen={openModule} onSection={goToSection} />
             })}
+
+            {s3Modules.length > 0 && (
+              <S3Group modules={s3Modules} modulesAll={modules} activeModule={activeModule} activeSection={activeSection} onOpen={openModule} onSection={goToSection} />
+            )}
 
             {filteredModules.length === 0 && (
               <div className="search-empty">Nenhum módulo encontrado</div>
@@ -164,49 +187,239 @@ function App() {
 
         <main className="content-area" ref={contentRef}>
           {!activeModule ? (
-            <WelcomeScreen modules={modules} totalSections={totalSections} onOpen={openModule} />
+            <WelcomeScreen modules={modules} totalSections={totalSections} totalViewed={viewedCount} onOpen={openModule} />
           ) : (
-            <div className="content-inner" key={activeModule.id}>
-              <div className="mod-eyebrow">
-                Módulo {moduleIndex + 1} de {modules.length}
-                <span className="kbd-hint">← → para navegar</span>
-              </div>
-              <h1 className="mod-title-h1">
-                {activeModule.title.replace(/Módulo \d+: /, '')}
-              </h1>
-
-              {activeModule.sections.map(sec => (
-                <div key={sec.id} className="section-block" id={`sec-${sec.id}`}>
-                  <h3 className="section-title-h3">{sec.title}</h3>
-                  <div className="md">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {sec.content}
-                    </ReactMarkdown>
-                  </div>
+            <div className="content-wrap">
+              <div className="content-inner" key={activeModule.id}>
+                <div className="mod-eyebrow">
+                  Módulo {moduleIndex + 1} de {modules.length}
+                  <span className="kbd-hint">← → para navegar</span>
                 </div>
-              ))}
+                <h1 className="mod-title-h1">
+                  {activeModule.title.replace(/Módulo \d+: /, '')}
+                </h1>
 
-              <div className="mod-nav-arrows">
-                {prevModule ? (
-                  <button className="arrow-btn" onClick={() => openModule(prevModule)}>
-                    ← <div><span className="arrow-lbl">Anterior</span>{prevModule.title.replace(/Módulo \d+: /, '')}</div>
-                  </button>
-                ) : <div style={{flex:1}} />}
-                {nextModule && (
-                  <button className="arrow-btn right" onClick={() => openModule(nextModule)}>
-                    <div><span className="arrow-lbl">Próximo</span>{nextModule.title.replace(/Módulo \d+: /, '')}</div> →
-                  </button>
-                )}
+                {currentSections.map(sec => {
+                  const isViewed = !!viewed[sec.id]
+                  return (
+                    <div key={sec.id} className={`section-block ${isViewed ? 'viewed' : ''}`} id={`sec-${sec.id}`} ref={el => secRefs.current[sec.id] = el}>
+                      <h3 className="section-title-h3">
+                        <button className="section-view-btn" onClick={() => markViewed(sec.id)} title="Marcar como lido">
+                          {isViewed ? '✓' : '○'}
+                        </button>
+                        {sec.title}
+                      </h3>
+                      <div className="md">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+                          {sec.content}
+                        </ReactMarkdown>
+                      </div>
+                    </div>
+                  )
+                })}
+
+                <div className="mod-nav-arrows">
+                  {prevModule ? (
+                    <button className="arrow-btn" onClick={() => openModule(prevModule)}>
+                      ← <div><span className="arrow-lbl">Anterior</span>{prevModule.title.replace(/Módulo \d+: /, '')}</div>
+                    </button>
+                  ) : <div style={{flex:1}} />}
+                  {nextModule && (
+                    <button className="arrow-btn right" onClick={() => openModule(nextModule)}>
+                      <div><span className="arrow-lbl">Próximo</span>{nextModule.title.replace(/Módulo \d+: /, '')}</div> →
+                    </button>
+                  )}
+                </div>
               </div>
+
+              {currentSections.length > 0 && (
+                <aside className="toc-sidebar">
+                  <div className="toc-label">Nesta página</div>
+                  {currentSections.map(sec => (
+                    <button
+                      key={sec.id}
+                      className={`toc-item ${activeSection === sec.id ? 'active' : ''}`}
+                      onClick={() => goToSection(sec.id)}
+                    >
+                      <span className={`toc-bullet ${viewed[sec.id] ? 'done' : ''}`} />
+                      {sec.title}
+                    </button>
+                  ))}
+                </aside>
+              )}
             </div>
           )}
         </main>
+      </div>
+
+      {paletteOpen && (
+        <CommandPalette modules={modules} onOpen={openModule} onClose={() => setPaletteOpen(false)} />
+      )}
+    </div>
+  )
+}
+
+function ModuleItem({ mod, realIndex, isActive, activeSection, onOpen, onSection }) {
+  return (
+    <div>
+      <button className="mod-btn" onClick={() => onOpen(mod)}>
+        <div className={`mod-header ${isActive ? 'active' : ''}`}>
+          <span className="mod-num">{String(realIndex + 1).padStart(2, '0')}</span>
+          <span className="mod-title">{mod.title.replace(/Módulo \d+: /, '')}</span>
+        </div>
+      </button>
+      {isActive && mod.sections.length > 0 && (
+        <div className="sec-list">
+          {mod.sections.map(sec => (
+            <button
+              key={sec.id}
+              className={`sec-btn ${activeSection === sec.id ? 'active' : ''}`}
+              onClick={() => onSection(sec.id)}
+            >
+              {sec.title}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function S3Group({ modules, modulesAll, activeModule, activeSection, onOpen, onSection }) {
+  const [open, setOpen] = useState(false)
+  const firstIdx = modulesAll.findIndex(m => m.id === modules[0]?.id)
+  return (
+    <div className="s3-group">
+      <button className="mod-btn" onClick={() => setOpen(o => !o)}>
+        <div className={`mod-header s3-group-header ${open ? 'open' : ''}`}>
+          <span className="mod-num">{String(firstIdx + 1)}–{String(firstIdx + modules.length)}</span>
+          <span className="mod-title">Amazon S3 ({modules.length})</span>
+          <span className="s3-chevron">{open ? '▾' : '▸'}</span>
+        </div>
+      </button>
+      {open && modules.map(mod => {
+        const isActive = activeModule?.id === mod.id
+        const realIndex = modulesAll.findIndex(m => m.id === mod.id)
+        return (
+          <div key={mod.id} className="s3-sub">
+            <button className="mod-btn" onClick={() => onOpen(mod)}>
+              <div className={`mod-header s3-sub-header ${isActive ? 'active' : ''}`}>
+                <span className="mod-num">{String(realIndex + 1).padStart(2, '0')}</span>
+                <span className="mod-title">{mod.title.replace(/Módulo \d+: /, '')}</span>
+              </div>
+            </button>
+            {isActive && mod.sections.length > 0 && (
+              <div className="sec-list">
+                {mod.sections.map(sec => (
+                  <button key={sec.id} className={`sec-btn ${activeSection === sec.id ? 'active' : ''}`} onClick={() => onSection(sec.id)}>{sec.title}</button>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function CommandPalette({ modules, onOpen, onClose }) {
+  const [query, setQuery] = useState('')
+  const [idx, setIdx] = useState(0)
+  const inputRef = useRef(null)
+
+  const items = useMemo(() => {
+    const q = query.toLowerCase().trim()
+    if (!q) return []
+    const result = []
+    for (const mod of modules) {
+      if (mod.title.toLowerCase().includes(q)) {
+        result.push({ type: 'module', mod, label: mod.title.replace(/Módulo \d+: /, '') })
+      }
+      for (const sec of mod.sections) {
+        if (sec.title.toLowerCase().includes(q)) {
+          result.push({ type: 'section', mod, sec, label: sec.title + ` — ${mod.title.replace(/Módulo \d+: /, '')}` })
+        }
+      }
+    }
+    return result.slice(0, 20)
+  }, [modules, query])
+
+  useEffect(() => { setIdx(0) }, [query])
+
+  useEffect(() => {
+    inputRef.current?.focus()
+    function handleKey(e) {
+      if (e.key === 'Escape') { onClose(); return }
+      if (e.key === 'ArrowDown') { e.preventDefault(); setIdx(i => Math.min(i + 1, items.length - 1)) }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setIdx(i => Math.max(i - 1, 0)) }
+      if (e.key === 'Enter' && items[idx]) {
+        const item = items[idx]
+        if (item.type === 'section') {
+          onOpen(item.mod)
+          setTimeout(() => {
+            const el = document.getElementById('sec-' + item.sec.id)
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }, 100)
+        } else {
+          onOpen(item.mod)
+        }
+        onClose()
+      }
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [items, idx, onClose, onOpen])
+
+  return (
+    <div className="palette-overlay" onClick={onClose}>
+      <div className="palette-modal" onClick={e => e.stopPropagation()}>
+        <input
+          ref={inputRef}
+          className="palette-input"
+          type="text"
+          placeholder="Buscar módulos e tópicos…"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+        />
+        <div className="palette-results">
+          {items.length === 0 && query.trim() && (
+            <div className="palette-empty">Nenhum resultado para "{query}"</div>
+          )}
+          {items.map((item, i) => (
+            <button
+              key={item.type + '-' + (item.sec?.id || item.mod.id)}
+              className={`palette-item ${i === idx ? 'focused' : ''}`}
+              onMouseDown={() => {
+                if (item.type === 'section') {
+                  onOpen(item.mod)
+                  setTimeout(() => {
+                    const el = document.getElementById('sec-' + item.sec.id)
+                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                  }, 100)
+                } else {
+                  onOpen(item.mod)
+                }
+                onClose()
+              }}
+            >
+              <span className="palette-type">{item.type === 'module' ? 'M' : 'S'}</span>
+              <span className="palette-label">{item.label}</span>
+            </button>
+          ))}
+        </div>
+        {items.length > 0 && (
+          <div className="palette-footer">
+            <span>↑↓ navegar</span>
+            <span>↵ abrir</span>
+            <span>⎋ fechar</span>
+          </div>
+        )}
       </div>
     </div>
   )
 }
 
-function WelcomeScreen({ modules, totalSections, onOpen }) {
+function WelcomeScreen({ modules, totalSections, totalViewed, onOpen }) {
   const [welSearch, setWelSearch] = useState('')
 
   const filtered = welSearch.trim()
@@ -236,8 +449,8 @@ function WelcomeScreen({ modules, totalSections, onOpen }) {
       <div className="stats-bar">
         <div><div className="stat-val">{modules.length}</div><div className="stat-lbl">Módulos</div></div>
         <div><div className="stat-val">{totalSections}</div><div className="stat-lbl">Tópicos</div></div>
-        <div><div className="stat-val">SAA-C03</div><div className="stat-lbl">Exame alvo</div></div>
-        <div><div className="stat-val">☁</div><div className="stat-lbl">Multi-serviço</div></div>
+        <div><div className="stat-val">{totalViewed}</div><div className="stat-lbl">Vistos</div></div>
+        <div><div className="stat-val">⌘K</div><div className="stat-lbl">Busca rápida</div></div>
       </div>
 
       <div className="welcome-search">
@@ -265,6 +478,32 @@ function WelcomeScreen({ modules, totalSections, onOpen }) {
       </div>
     </div>
   )
+}
+
+function PreBlock({ children }) {
+  const [copied, setCopied] = useState(false)
+  const codeRef = useRef(null)
+  const handleCopy = useCallback(() => {
+    const text = codeRef.current?.textContent || ''
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }, [])
+  return (
+    <div className="code-wrap">
+      <button className={`copy-btn ${copied ? 'copied' : ''}`} onClick={handleCopy}>
+        {copied ? 'Copiado' : 'Copiar'}
+      </button>
+      <pre ref={codeRef}>{children}</pre>
+    </div>
+  )
+}
+
+const mdComponents = {
+  pre({ children }) {
+    return <PreBlock>{children}</PreBlock>
+  }
 }
 
 export default App
