@@ -302,14 +302,11 @@ function S3Group({ modules, modulesAll, activeModule, activeSection, onOpen, onS
   const [open, setOpen] = useState(false)
   return (
     <div className="s3-group">
-      <div className="s3-divider" />
       <button className="mod-btn" onClick={() => setOpen(o => !o)}>
         <div className="s3-group-header">
           <span className="s3-group-label">S3</span>
-          <span className="s3-group-title">
-            <span className="s3-group-name">Amazon S3</span>
-            <span className="s3-group-count">{modules.length} módulos</span>
-          </span>
+          <span className="s3-group-name">Amazon S3</span>
+          <span className="s3-group-count">{modules.length}</span>
           <span className="s3-chevron">{open ? '▾' : '▸'}</span>
         </div>
       </button>
