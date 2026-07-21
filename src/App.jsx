@@ -10,7 +10,17 @@ function App() {
   const [activeModule, setActiveModule] = useState(null)
   const [activeSection, setActiveSection] = useState(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light')
   const contentRef = useRef(null)
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    localStorage.setItem('theme', theme)
+  }, [theme])
+
+  function toggleTheme() {
+    setTheme(t => t === 'light' ? 'dark' : 'light')
+  }
 
   useEffect(() => {
     const parsed = parseKnowledge(knowledgeMd)
@@ -56,6 +66,7 @@ function App() {
         <div className="header-sep" />
         <span className="header-subtitle">AWS SAA-C03</span>
         <div className="header-right">
+          <button className="theme-btn" onClick={toggleTheme} title="Alternar tema">{theme === 'light' ? '🌙' : '☀️'}</button>
           <span className="aws-badge">☁ SAA-C03</span>
           <button className="back-hub-btn" onClick={() => window.location.href = 'https://hugosergio.com.br/guide/'}>← Guia Hub</button>
         </div>
