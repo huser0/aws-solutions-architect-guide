@@ -146,6 +146,19 @@ body {
 .mod-header.active .mod-num { color: var(--accent); }
 .mod-title { text-align: left; }
 
+.mod-row { display: flex; align-items: stretch; }
+.mod-open-btn { flex: 1; min-width: 0; }
+.mod-expand-btn {
+  background: none; border: none; cursor: pointer;
+  padding: 0 10px 0 4px; display: flex; align-items: center;
+  color: var(--text-muted); transition: color 0.12s;
+}
+.mod-expand-btn:hover { color: var(--text-primary); }
+.mod-chevron {
+  font-size: 9px; transition: transform 0.15s ease; display: block;
+}
+.mod-chevron.open { transform: rotate(90deg); }
+
 .sec-list { padding-left: 40px; padding-bottom: 4px; }
 .sec-btn {
   display: block; width: 100%; text-align: left; background: none;
@@ -253,27 +266,7 @@ body {
 .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
 .copy-btn.copied { opacity: 1; border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 
-/* ───── S3 Group ───── */
-.s3-group { margin-bottom: 2px; }
-.s3-group-header {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 20px; cursor: pointer; background: none; border: none;
-  width: 100%; text-align: left; font-family: var(--font-body);
-  transition: background 0.12s; border-left: 2px solid transparent;
-  font-size: 12px; color: var(--text-muted);
-}
-.s3-group-header:hover { background: var(--bg-hover); color: var(--text-secondary); }
-.s3-group-label {
-  font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); min-width: 22px;
-}
-.s3-group-name { color: var(--text-secondary); }
-.s3-group-count { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); margin-left: 4px; }
-.s3-chevron {
-  margin-left: auto; font-size: 9px; color: var(--text-muted);
-  transition: transform 0.15s;
-}
-.s3-sub { padding-left: 32px; }
-.s3-sub-header { padding: 5px 16px; font-size: 12px; }
+
 
 /* ───── Command Palette ───── */
 .palette-overlay {

@@ -21,6 +21,10 @@ function App() {
   const [search, setSearch] = useState('')
   const [viewed, setViewed] = useState(loadProgress)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [expandedMods, setExpandedMods] = useState(() => {
+    const lastId = localStorage.getItem(LAST_MOD_KEY)
+    return lastId ? new Set([lastId]) : new Set()
+  })
   const contentRef = useRef(null)
   const secRefs = useRef({})
 
@@ -58,19 +62,14 @@ function App() {
     )
   }, [modules, search])
 
-  const s3Modules = useMemo(() => {
-    return filteredModules.filter(m => /^Módulo (?:07|08|09|10|11|12|13|14|15|16|17|18|19)/.test(m.title))
-  }, [filteredModules])
-
-  const modulesBeforeS3 = useMemo(() => {
-    const s3Ids = new Set(s3Modules.map(m => m.id))
-    return filteredModules.filter(m => !s3Ids.has(m.id) && (modules.findIndex(p => p.id === m.id) < modules.findIndex(p => p.id === s3Modules[0]?.id)))
-  }, [filteredModules, modules, s3Modules])
-
-  const modulesAfterS3 = useMemo(() => {
-    const s3Ids = new Set(s3Modules.map(m => m.id))
-    return filteredModules.filter(m => !s3Ids.has(m.id) && (modules.findIndex(p => p.id === m.id) > modules.findIndex(p => p.id === s3Modules[s3Modules.length - 1]?.id)))
-  }, [filteredModules, modules, s3Modules])
+  function toggleExpanded(modId) {
+    setExpandedMods(prev => {
+      const next = new Set(prev)
+      if (next.has(modId)) next.delete(modId)
+      else next.add(modId)
+      return next
+    })
+  }
 
   function markViewed(secId) {
     if (viewed[secId]) return
@@ -176,20 +175,19 @@ function App() {
             </button>
 
 
-            {modulesBeforeS3.map((mod, i) => {
+            {filteredModules.map((mod, i) => {
               const isActive = activeModule?.id === mod.id
               const realIndex = modules.findIndex(m => m.id === mod.id)
-              return <ModuleItem key={mod.id} mod={mod} realIndex={realIndex} isActive={isActive} activeSection={activeSection} onOpen={openModule} onSection={goToSection} />
-            })}
-
-            {s3Modules.length > 0 && (
-              <S3Group modules={s3Modules} modulesAll={modules} activeModule={activeModule} activeSection={activeSection} onOpen={openModule} onSection={goToSection} />
-            )}
-
-            {modulesAfterS3.map((mod, i) => {
-              const isActive = activeModule?.id === mod.id
-              const realIndex = modules.findIndex(m => m.id === mod.id)
-              return <ModuleItem key={mod.id} mod={mod} realIndex={realIndex} isActive={isActive} activeSection={activeSection} onOpen={openModule} onSection={goToSection} />
+              const expanded = expandedMods.has(mod.id)
+              return (
+                <ModuleItem
+                  key={mod.id} mod={mod} realIndex={realIndex}
+                  isActive={isActive} expanded={expanded}
+                  activeSection={activeSection}
+                  onOpen={openModule} onSection={goToSection}
+                  onToggle={() => toggleExpanded(mod.id)}
+                />
+              )
             })}
 
             {filteredModules.length === 0 && (
@@ -272,16 +270,23 @@ function App() {
   )
 }
 
-function ModuleItem({ mod, realIndex, isActive, activeSection, onOpen, onSection }) {
+function ModuleItem({ mod, realIndex, isActive, expanded, activeSection, onOpen, onSection, onToggle }) {
   return (
     <div>
-      <button className="mod-btn" onClick={() => onOpen(mod)}>
-        <div className={`mod-header ${isActive ? 'active' : ''}`}>
-          <span className="mod-num">{String(realIndex + 1).padStart(2, '0')}</span>
-          <span className="mod-title">{mod.title.replace(/Módulo \d+: /, '')}</span>
-        </div>
-      </button>
-      {isActive && mod.sections.length > 0 && (
+      <div className="mod-row">
+        <button className="mod-btn mod-open-btn" onClick={() => onOpen(mod)}>
+          <div className={`mod-header ${isActive ? 'active' : ''}`}>
+            <span className="mod-num">{String(realIndex + 1).padStart(2, '0')}</span>
+            <span className="mod-title">{mod.title.replace(/Módulo \d+: /, '')}</span>
+          </div>
+        </button>
+        {mod.sections.length > 0 && (
+          <button className="mod-expand-btn" onClick={onToggle} title={expanded ? 'Recolher seções' : 'Expandir seções'}>
+            <span className={`mod-chevron ${expanded ? 'open' : ''}`}>▸</span>
+          </button>
+        )}
+      </div>
+      {expanded && mod.sections.length > 0 && (
         <div className="sec-list">
           {mod.sections.map(sec => (
             <button
@@ -294,43 +299,6 @@ function ModuleItem({ mod, realIndex, isActive, activeSection, onOpen, onSection
           ))}
         </div>
       )}
-    </div>
-  )
-}
-
-function S3Group({ modules, modulesAll, activeModule, activeSection, onOpen, onSection }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="s3-group">
-      <button className="mod-btn" onClick={() => setOpen(o => !o)}>
-        <div className="s3-group-header">
-          <span className="s3-group-label">S3</span>
-          <span className="s3-group-name">Amazon S3</span>
-          <span className="s3-group-count">{modules.length}</span>
-          <span className="s3-chevron">{open ? '▾' : '▸'}</span>
-        </div>
-      </button>
-      {open && modules.map(mod => {
-        const isActive = activeModule?.id === mod.id
-        const realIndex = modulesAll.findIndex(m => m.id === mod.id)
-        return (
-          <div key={mod.id} className="s3-sub">
-            <button className="mod-btn" onClick={() => onOpen(mod)}>
-              <div className={`mod-header s3-sub-header ${isActive ? 'active' : ''}`}>
-                <span className="mod-num">{String(realIndex + 1).padStart(2, '0')}</span>
-                <span className="mod-title">{mod.title.replace(/Módulo \d+: /, '')}</span>
-              </div>
-            </button>
-            {isActive && mod.sections.length > 0 && (
-              <div className="sec-list">
-                {mod.sections.map(sec => (
-                  <button key={sec.id} className={`sec-btn ${activeSection === sec.id ? 'active' : ''}`} onClick={() => onSection(sec.id)}>{sec.title}</button>
-                ))}
-              </div>
-            )}
-          </div>
-        )
-      })}
     </div>
   )
 }
