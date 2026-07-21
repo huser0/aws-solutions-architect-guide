@@ -346,6 +346,40 @@ O termo "Glacier" pode enganar. **Glacier Instant Retrieval** (desde nov/2021) p
 
 > 🎯 **Atenção:** One Zone-IA = 1 AZ → não use para dados críticos. Intelligent-Tiering tem **taxa de monitoramento** por objeto, mas **sem custo de recuperação** nos tiers padrão.
 
+### Custo na prática (us-east-1, USD)
+
+| Classe | Preço / GB / mês | Mín. armazenamento | Custo 50 TB/mês |
+|---|---|---|---|
+| **S3 Standard** | $0.023 | — | ~$1.150 |
+| **S3 Standard-IA** | $0.0125 | 30 dias | ~$640 |
+| **S3 One Zone-IA** | $0.01 | 30 dias | ~$512 |
+| **S3 Glacier Instant Retrieval** | $0.004 | 90 dias | ~$205 |
+| **S3 Glacier Flexible Retrieval** | $0.0036 | 90 dias | ~$184 |
+| **S3 Glacier Deep Archive** | $0.00099 | 180 dias | ~$51 |
+| **S3 Intelligent-Tiering** | $0.023 → $0.0125 → … | — | ~$620* |
+
+> *Intelligent-Tiering: taxa de monitoramento de $0.0025/1.000 objetos. Para 50TB com objetos médios de 1MB (~50M objetos) = ~$125/mês adicionais.
+
+### Cenário real — Logs de aplicação (50TB/mês)
+
+```
+📦 50TB de logs mensais, retenção de 12 meses
+    ┌─ Standard (dia 0–30):   50TB × $0.023  = $1.150
+    ├─ Standard-IA (30–90d):  50TB × $0.0125 =   $640
+    └─ Glacier Flex (90–365d): 50TB × $0.0036 =   $184
+                                               ──────
+                  Média mensal:               ~$380
+                  Economia vs Standard só:     **67%**
+```
+
+### Cenário real — Objetos pequenos em Glacier (pegadinha)
+
+> ⚠️ **"Migrei 10M de objetos de 10KB para Glacier Flexible e o custo triplicou."**
+>
+> Motivo: Glacier cobra mínimo de **128KB por objeto**. 10M × 10KB = 100 GB lógicos, mas você paga como 10M × 128KB = 1.28 TB. Custo real: **~$47/mês** em vez de **~$3.70** esperados.
+>
+> ✅ **Solução:** Agrupe objetos pequenos em arquivos ZIP/TAR antes de arquivar, ou use S3 Lifecycle com filtro de tamanho (`SizeGreaterThan`) para mover apenas objetos >128KB para Glacier.
+
 ### Se você conhece o padrão de acesso
 
 | Acesso | Classe |
@@ -392,6 +426,84 @@ Standard (dia 0) → Standard-IA (30d) → Glacier Flexible (365d) → Deep Arch
 ```
 
 > 🎯 **Atenção:** Transition só vai "do quente para o frio" (não volta). Durações mínimas: 30d IA, 90d Glacier, 180d Deep Archive. Versionamento habilitado → regras separadas para current e noncurrent.
+
+### 4 cenários reais de economia
+
+#### 📘 Cenário 1 — Lifecycle vs Intelligent-Tiering
+
+```
+Workload: 20TB de assets de mídia
+Acesso: frequente nos primeiros 30 dias, esporádico depois
+
+Tudo em Standard:          20TB × $0.023  = $460/mês
+Intelligent-Tiering:       20TB × $0.023 → $0.0125*
+                            + taxa monitoramento (20M obj × $0.0025/1K) = $50
+                           Total ≈ **$410/mês**
+Lifecycle customizado:     30d Standard → 90d IA → Glacier Flex
+                           Média ≈ **$290/mês**
+Economia:                  **37% vs Standard, 29% vs I-T**
+```
+
+> ✅ Lifecycle é mais barato quando o padrão de acesso é previsível. Intelligent-Tiering compensa quando o padrão é desconhecido ou varia muito.
+
+#### 🌐 Cenário 2 — CloudFront reduzindo egress
+
+```
+10TB/mês servidos para internet
+
+S3 direto:
+  Transfer (egress):  10TB × $0.09* = $900
+  Requests GET:       10M × $0.0004  =   $4
+  Total ≈ $904
+
+Com CloudFront na frente:
+  Transfer CF:         10TB × $0.085 = $850
+  Requests CF:         10M × $0.0075 =  $75
+  Requests S3 (cache hit 80%): 2M × $0.0004 = $0.80
+  Total ≈ $926
+  ───
+  🤔 "CloudFront é mais caro?" Só na conta isolada.
+  Com cache, as requisições ao S3 caem ~80%, reduzindo
+  pico de IOPS e custo de origem. Para workloads globais,
+  a latência cai de 200ms para ~30ms (p95).
+
+  💡 Real: CloudFront + S3 fica mais barato que S3 puro
+  quando o cache hit rate > 70% para transfer, ou quando
+  você usa Price Class 100 (apenas EUA/Europa).
+```
+
+* Preços de transfer variam por faixa. Simplificado para 10TB.
+
+#### 🐜 Cenário 3 — Small object penalty
+
+```
+100M objetos de 5KB arquivados em Deep Archive
+
+Custo esperado (5KB lógico):  100M × 5KB × $0.00099/GB  =  ~$0.47/mês
+Custo real (128KB mínimo):    100M × 128KB × $0.00099/GB = ~$12.00/mês
+                                ───
+                                **25× mais caro que o esperado**
+```
+
+> ⚠️ A pegadinha é clássica em prova SAA-C03: a AWS cobra pelo **mínimo de 128KB** para objetos em Glacier e Deep Archive. Objetos menores pagam como se tivessem 128KB. **Solução**: agregue em arquivos maiores antes de arquivar, ou use filtro de tamanho nas Lifecycle Rules.
+
+#### 🔄 Cenário 4 — Versionamento sem lifecycle
+
+```
+Bucket de 1TB com versionamento ativo
+10% dos objetos alterados por dia (~100GB/dia de novas versões)
+
+Sem regra de expurgo:
+  Após 10 dias: 1TB + 1TB = 2TB (custo dobra)
+  Após 30 dias: 1TB + 3TB = 4TB → $92/mês
+
+Com NoncurrentVersionExpiration = 30 dias:
+  Versões antigas expiram após 30 dias
+  Custo adicional máximo: ~100GB × 30 dias = 3TB
+  Custo extra estável: ~$69/mês (vs crescer indefinidamente)
+```
+
+> 📌 Lifecycle Rule recomendada: `<NoncurrentVersionExpiration days="30"/>` mantém o custo de versionamento previsível. Essential para buckets com alta taxa de alteração (logs, backups incrementais).
 
 ---
 
