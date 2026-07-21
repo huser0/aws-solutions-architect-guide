@@ -57,6 +57,7 @@ function App() {
         <span className="header-subtitle">AWS SAA-C03</span>
         <div className="header-right">
           <span className="aws-badge">☁ SAA-C03</span>
+          <button className="back-hub-btn" onClick={() => window.location.href = 'https://hugosergio.com.br/guide/'}>← Guia Hub</button>
         </div>
       </header>
 
