@@ -255,12 +255,27 @@ body {
 
 /* ───── S3 Group ───── */
 .s3-group { margin-bottom: 4px; }
-.s3-group-header { cursor: pointer; }
-.s3-group-header .s3-chevron {
-  margin-left: auto; font-size: 10px; color: var(--text-muted);
-  transition: transform 0.15s;
+.s3-divider {
+  height: 1px; background: var(--border); margin: 8px 20px 4px;
 }
-.s3-sub { padding-left: 12px; border-left: 1px solid var(--border); margin-left: 12px; }
+.s3-group-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 20px; cursor: pointer; background: none; border: none;
+  width: 100%; text-align: left; font-family: var(--font-body);
+  transition: background 0.12s;
+}
+.s3-group-header:hover { background: var(--bg-hover); }
+.s3-group-label {
+  font-family: var(--font-serif); font-weight: 800; font-size: 13px;
+  color: var(--accent); min-width: 22px;
+}
+.s3-group-title { flex: 1; }
+.s3-group-name { display: block; font-size: 13px; color: var(--text-primary); font-weight: 500; }
+.s3-group-count { display: block; font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 1px; }
+.s3-chevron {
+  font-size: 10px; color: var(--text-muted); transition: transform 0.15s;
+}
+.s3-sub { padding-left: 12px; border-left: 1px solid var(--border); margin-left: 32px; margin-bottom: 2px; }
 .s3-sub-header { padding: 5px 16px; font-size: 12px; }
 
 /* ───── Command Palette ───── */

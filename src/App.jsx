@@ -62,9 +62,15 @@ function App() {
     return filteredModules.filter(m => /^Módulo (?:07|08|09|10|11|12|13|14|15|16|17|18|19)/.test(m.title))
   }, [filteredModules])
 
-  const otherModules = useMemo(() => {
-    return filteredModules.filter(m => !/^Módulo (?:07|08|09|10|11|12|13|14|15|16|17|18|19)/.test(m.title))
-  }, [filteredModules])
+  const modulesBeforeS3 = useMemo(() => {
+    const s3Ids = new Set(s3Modules.map(m => m.id))
+    return filteredModules.filter(m => !s3Ids.has(m.id) && (modules.findIndex(p => p.id === m.id) < modules.findIndex(p => p.id === s3Modules[0]?.id)))
+  }, [filteredModules, modules, s3Modules])
+
+  const modulesAfterS3 = useMemo(() => {
+    const s3Ids = new Set(s3Modules.map(m => m.id))
+    return filteredModules.filter(m => !s3Ids.has(m.id) && (modules.findIndex(p => p.id === m.id) > modules.findIndex(p => p.id === s3Modules[s3Modules.length - 1]?.id)))
+  }, [filteredModules, modules, s3Modules])
 
   function markViewed(secId) {
     if (viewed[secId]) return
@@ -169,7 +175,8 @@ function App() {
               </div>
             </button>
 
-            {otherModules.length > 0 && otherModules.map((mod, i) => {
+
+            {modulesBeforeS3.map((mod, i) => {
               const isActive = activeModule?.id === mod.id
               const realIndex = modules.findIndex(m => m.id === mod.id)
               return <ModuleItem key={mod.id} mod={mod} realIndex={realIndex} isActive={isActive} activeSection={activeSection} onOpen={openModule} onSection={goToSection} />
@@ -178,6 +185,12 @@ function App() {
             {s3Modules.length > 0 && (
               <S3Group modules={s3Modules} modulesAll={modules} activeModule={activeModule} activeSection={activeSection} onOpen={openModule} onSection={goToSection} />
             )}
+
+            {modulesAfterS3.map((mod, i) => {
+              const isActive = activeModule?.id === mod.id
+              const realIndex = modules.findIndex(m => m.id === mod.id)
+              return <ModuleItem key={mod.id} mod={mod} realIndex={realIndex} isActive={isActive} activeSection={activeSection} onOpen={openModule} onSection={goToSection} />
+            })}
 
             {filteredModules.length === 0 && (
               <div className="search-empty">Nenhum módulo encontrado</div>
@@ -287,13 +300,16 @@ function ModuleItem({ mod, realIndex, isActive, activeSection, onOpen, onSection
 
 function S3Group({ modules, modulesAll, activeModule, activeSection, onOpen, onSection }) {
   const [open, setOpen] = useState(false)
-  const firstIdx = modulesAll.findIndex(m => m.id === modules[0]?.id)
   return (
     <div className="s3-group">
+      <div className="s3-divider" />
       <button className="mod-btn" onClick={() => setOpen(o => !o)}>
-        <div className={`mod-header s3-group-header ${open ? 'open' : ''}`}>
-          <span className="mod-num">{String(firstIdx + 1)}–{String(firstIdx + modules.length)}</span>
-          <span className="mod-title">Amazon S3 ({modules.length})</span>
+        <div className="s3-group-header">
+          <span className="s3-group-label">S3</span>
+          <span className="s3-group-title">
+            <span className="s3-group-name">Amazon S3</span>
+            <span className="s3-group-count">{modules.length} módulos</span>
+          </span>
           <span className="s3-chevron">{open ? '▾' : '▸'}</span>
         </div>
       </button>
