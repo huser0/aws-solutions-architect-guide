@@ -565,7 +565,71 @@ s3.upload_file("video.mp4", "meu-bucket", "uploads/video.mp4", Config=config)
 - **DynamoDB Streams**: captura modificações na tabela em ordem temporal (24h de retenção). Gatilho para Lambda.
 - **TTL (Time to Live)**: expira itens automaticamente sem custo adicional (útil para sessions, logs temporários).
 
-> 🎯 **Ponto de atenção:** DynamoDB é NoSQL — não suporta joins, consultas complexas ou transações multi-item. Para queries SQL, use RDS.
+### Transações e PartiQL
+
+- **DynamoDB Transactions**: operações ACID multi-item e multi-tabela (2 transações por segundo por partição).
+- **PartiQL**: SQL compatível com DynamoDB (SELECT, INSERT, UPDATE, DELETE) via Console, CLI ou SDK.
+
+### DAX — DynamoDB Accelerator
+
+- Cache em memória **totalmente gerenciado** para DynamoDB.
+- Reduz latência de leitura de milissegundos para **microssegundos** (até 10x).
+- **Não é para escrita** — apenas cache de leitura.
+- Diferente de ElastiCache (genérico), DAX é específico para DynamoDB e fica na frente da tabela.
+- Ideal para workloads **read-heavy** (gamificação, dashboards, sessões).
+- TTL do cache configurável por item.
+
+### Hot Keys e Write Sharding
+
+- **Hot Key**: uma única partition key recebe requests desproporcionais → throttling.
+- **Write Sharding**: adiciona sufixo aleatório à partition key para distribuir escritas uniformemente.
+- **Adaptive Capacity**: DynamoDB ajusta automaticamente throughput para partições "quentes" (a partir de 2021).
+
+### Backup e Restore
+
+- **On-Demand Backup**: backup completo da tabela sem impacto de performance.
+- **PITR (Point-in-Time Recovery)**: restaura a tabela para qualquer ponto nos últimos **35 dias** (contínuo).
+- Backups são restaurados para **novas tabelas** (não é possível restaurar no lugar).
+
+### Security
+
+- **Encryption at rest**: KMS (AWS managed, Customer managed) ou DynamoDB owned key.
+- **Encryption in transit**: HTTPS obrigatório.
+- **VPC Endpoints**: Gateway endpoint ou Interface endpoint (com PrivateLink) para acessar DynamoDB dentro da VPC.
+- **Fine-Grained Access Control**: IAM conditions baseadas em atributos do item (`dynamodb:LeadingKeys`).
+
+### CLI Examples
+
+```bash
+# Criar tabela com autoscaling
+aws dynamodb create-table --table-name Orders \
+  --attribute-definitions AttributeName=OrderId,AttributeType=S \
+  --key-schema AttributeName=OrderId,KeyType=HASH \
+  --billing-mode PAY_PER_REQUEST
+
+# Scan com filter
+aws dynamodb scan --table-name Orders \
+  --filter-expression "Amount > :val" \
+  --expression-attribute-values '{":val":{"N":"100"}}'
+
+# Query
+aws dynamodb query --table-name Orders \
+  --key-condition-expression "OrderId = :id" \
+  --expression-attribute-values '{":id":{"S":"ORD-123"}}'
+```
+
+| Conceito | O que é? |
+|---|---|
+| **Global Tables** | Replicação multi-região ativo-ativo (baseada em Streams) |
+| **DAX** | Cache em memória específico DynamoDB (microssegundos) |
+| **PartiQL** | SQL compatível para DynamoDB |
+| **Transactions** | ACID multi-item |
+| **TTL** | Expiração automática de itens sem custo |
+| **PITR** | Restore point-in-time (35 dias) |
+| **Write Sharding** | Técnica para distribuir hot keys |
+| **Adaptive Capacity** | Ajuste automático de throughput por partição |
+
+> 🎯 **Ponto de atenção:** DynamoDB é NoSQL — não suporta joins, consultas complexas ou transações multi-item. Para queries SQL, use RDS. **DAX** vs **ElastiCache**: DAX é específico para DynamoDB e transparente para o aplicativo; ElastiCache (Redis/Memcached) é genérico e requer cacheagem manual.
 
 ---
 
@@ -578,14 +642,76 @@ Serviço de filas gerenciado para desacoplamento de microsserviços.
 - **Standard Queue**: throughput ilimitado, mas ordem **não garantida** e entrega **pelo menos uma vez** (duplicatas possíveis).
 - **FIFO Queue**: ordem garantida (first-in-first-out) e **exatamente uma vez**. Sufixo `.fifo`. 300 msg/s (ou 3000 com batch).
 
+### SQS — Conceitos Avançados
+
+- **Visibility Timeout**: período em que uma mensagem fica invisível após ser lida (30s padrão, max 12h). Se o consumer não a deletar dentro do timeout, a mensagem volta para a fila.
+- **Dead Letter Queue (DLQ)**: fila para onde mensagens são redirecionadas após falharem `maxReceiveCount` vezes. Ideal para debugging.
+- **Delay Queue**: atraso inicial na entrega de mensagens (0s a 15min). No FIFO, delay é por fila (não por mensagem).
+- **Long Polling**: consumer espera até `WaitTimeSeconds` (1-20s) por mensagens. Reduz custo (menos polls vazios). Rec `ReceiveMessageWaitTimeSeconds`.
+- **Short Polling**: retorna imediatamente (pode vir vazio). Mais requisições, maior custo.
+- **Message Attributes**: metadados estruturados junto com o body (nome, tipo, valor).
+- **SQS Extended Client Library**: mensagens grandes (>256KB) são armazenadas no S3, SQS carrega apenas o pointer.
+- **Encryption**: KMS at rest; HTTPS in transit; **requer permissão `kms:Decrypt` no consumer**.
+
+### SQS vs SQS FIFO
+
+| Característica | Standard | FIFO |
+|---|---|---|
+| Ordem | Não garantida | Garantida (first-in-first-out) |
+| Entrega | At least once | Exactly once |
+| Throughput | Ilimitado | 300 msg/s (ou 3000 com batch) |
+| DLQ | Sim | Sim |
+| Sufixo | — | `.fifo` |
+| Custo | Menor | Maior |
+
 ### Amazon SNS (Simple Notification Service)
 
 Serviço de Pub/Sub gerenciado. Mensagens são empurradas para subscribers (SQS, Lambda, HTTP, email, SMS).
 
 - **Fan-out pattern**: SNS + SQS para entregar a mesma mensagem a múltiplos consumidores de forma confiável e desacoplada.
 - **Message Filtering**: filtra mensagens por policy (atributos) para que subscribers recebam apenas o que interessa.
+- **SNS FIFO**: tópico FIFO com SQS FIFO como subscriber — ordem garantida e exatamente uma vez em topologias fan-out.
+- **Message Durability**: SNS tenta entregar com retry exponencial (3 retries para HTTP, depois DLQ possível).
+- **SMS**: enviar SMS globalmente com remetente configurável (origination identity).
 
-> 🎯 **Ponto de atenção:** SQS = polling (consumer puxa). SNS = push (SNS empurra). O padrão **SNS → SQS** é o mais comum para processamento assíncrono confiável.
+### SNS vs SQS
+
+| Aspecto | SNS | SQS |
+|---|---|---|
+| Modelo | Pub/Sub (push) | Queue (polling) |
+| Consumer | Múltiplos subscribers ativos | Mensagem consumida por 1 consumer |
+| Entrega | Push (SNS envia) | Pull (consumer puxa) |
+| Persistência | Não armazena mensagens | Mensagens persistem (até 14 dias) |
+| Caso típico | Notificações, alertas, fan-out | Desacoplamento, buffer, DLQ |
+
+### CLI Examples
+
+```bash
+# Criar fila Standard
+aws sqs create-queue --queue-name MinhaFila
+
+# Criar fila FIFO
+aws sqs create-queue --queue-name MinhaFila.fifo \
+  --attributes FifoQueue=true,ContentBasedDeduplication=true
+
+# Enviar mensagem
+aws sqs send-message --queue-url <url> --message-body "Hello"
+
+# Receber mensagem (Long Poll)
+aws sqs receive-message --queue-url <url> --wait-time-seconds 20
+
+# Deletar mensagem
+aws sqs delete-message --queue-url <url> --receipt-handle <handle>
+
+# Criar tópico SNS
+aws sns create-topic --name MeuTopico
+
+# Inscrever SQS no SNS
+aws sns subscribe --topic-arn <arn> --protocol sqs \
+  --notification-endpoint <sqs-arn>
+```
+
+> 🎯 **Ponto de atenção:** SQS = polling (consumer puxa). SNS = push (SNS empurra). O padrão **SNS → SQS** é o mais comum para processamento assíncrono confiável. **Long Polling** reduz custo — sempre configure `WaitTimeSeconds`.
 
 ---
 
@@ -602,13 +728,101 @@ Serviço de Pub/Sub gerenciado. Mensagens são empurradas para subscribers (SQS,
   - Disco temporário `/tmp`: 512 MB a 10.240 MB.
   - Payload de requisição: 6 MB (síncrono), 256 KB (assíncrono).
 - **Stateless**: o ambiente é efêmero; para estado compartilhado, use DynamoDB ou ElastiCache.
+- **Runtimes**: Node.js, Python, Java, Go, .NET, Ruby, Custom Runtime (provides your own).
 
-### Concorrência
+### Concorrência e Scaling
 
-- **Reserved Concurrency**: garante um número fixo de execuções simultâneas.
-- **Provisioned Concurrency**: mantém ambientes "quentes" para baixa latência (importante para latência crítica).
+- **Reserved Concurrency**: garante um número fixo de execuções simultâneas. Útil para evitar que uma função consuma toda a concorrência da conta (limite regional: 1.000 execuções simultâneas).
+- **Provisioned Concurrency**: mantém ambientes "quentes" para baixa latência (importante para latência crítica). Cobrado mesmo quando não está em uso.
+- **Burst concurrency**: primeira vez que uma função é invocada, Lambda aloca subitamente (500-3000 execuções dependendo da região). Após o burst, cresce 500/minuto.
 
-> 🎯 **Ponto de atenção:** Lambda não é adequado para workloads de longa duração (>15 min) ou stateful. Para streaming contínuo, prefira ECS Fargate ou EC2.
+### Versions & Aliases
+
+- **Versions**: snapshot imutável do código + configuração (`$LATEST`, `1`, `2`, ...).
+- **Aliases**: ponteiros para uma versão específica (ex: `prod` → versão 2, `staging` → versão 1). Permite **weighted routing** (canary deployments).
+
+### Lambda Layers
+
+- Camada ZIP com dependências, bibliotecas ou runtime extensions.
+- Montada em `/opt` — compartilhável entre múltiplas funções.
+- **Limite**: 5 layers por função, até 250 MB (descompactado).
+
+### SnapStart (Java)
+
+- Lançado para reduzir **cold start** em Java (até 10x mais rápido).
+- Tira um snapshot do ambiente após inicialização (`Init`) e o retoma sob demanda.
+- Não suportado para `tmp` stateful ou streams efêmeros.
+
+### Container Support
+
+- Lambda suporta imagens de container (até 10 GB) via ECR.
+- Deve implementar **Lambda Runtime API**.
+- Útil para deployments consistentes com ECS/ECS Fargate.
+
+### Lambda@Edge
+
+- Executa funções Lambda em **edge locations** do CloudFront.
+- Útil para manipular requests/respostas na borda (rewrite headers, redirect, A/B testing, authentication).
+- Tempo máximo: **5 segundos** (viewer-request/viewer-response) ou 30s (origin-request/origin-response).
+
+### VPC Networking
+
+- Por padrão, Lambda roda no **VPC padrão da AWS** mas **não tem acesso** a recursos em VPC privada (RDS, ElastiCache, ENI interno).
+- Para acessar VPC privada: configure `VPC_CONFIG` com subnets + security group → Lambda cria um ENI em cada subnet.
+- **Consequência**: cold start mais lento (criação de ENI). Use **Provisioned Concurrency** ou **RDS Proxy** (para RDS) para mitigar.
+
+### Destinations e DLQ
+
+- **Destinations (Assíncrono)**: configura rotas para sucesso ou falha após invocação assíncrona (SQS, SNS, Lambda, EventBridge).
+- **DLQ (SQS/SNS)**: similar a Destinations, mas legado. Nova funções devem usar Destinations.
+
+### Environment Variables & Secrets
+
+- **Environment Variables**: até 4 KB. Criptografadas em repouso via KMS.
+- **Secrets Manager / Parameter Store**: use SDK para buscar secrets no runtime (não exponha em env vars).
+- **Code Signing**: assina código para garantir que apenas código confiável seja executado (Signer).
+
+| Conceito | Descrição |
+|---|---|
+| **Reserved Concurrency** | Garante N execuções simultâneas |
+| **Provisioned Concurrency** | Mantém ambientes quentes |
+| **SnapStart** | Reduz cold start Java (~10x) |
+| **Lambda@Edge** | Lambda na borda do CloudFront |
+| **Destinations** | Rotas pós-invocação (sucesso/falha) |
+| **Layers** | Dependências compartilhadas |
+| **VPC Config** | ENI para acessar recursos em VPC |
+| **Container Image** | Até 10 GB via ECR |
+| **Code Signing** | Garante integridade do código |
+
+### CLI Examples
+
+```bash
+# Listar funções
+aws lambda list-functions
+
+# Invocar função (síncrono)
+aws lambda invoke --function-name MinhaFuncao --payload '{"key":"val"}' output.json
+
+# Invocar (assíncrono)
+aws lambda invoke --function-name MinhaFuncao --invocation-type Event output.json
+
+# Criar função
+aws lambda create-function \
+  --function-name MinhaFuncao \
+  --runtime python3.12 \
+  --role arn:aws:iam::<account>:role/lambda-role \
+  --handler index.handler \
+  --zip-file fileb://function.zip
+
+# Publicar versão
+aws lambda publish-version --function-name MinhaFuncao
+
+# Criar alias
+aws lambda create-alias --function-name MinhaFuncao \
+  --name prod --function-version 2
+```
+
+> 🎯 **Ponto de atenção:** Lambda não é adequado para workloads de longa duração (>15 min) ou stateful. Para streaming contínuo, prefira ECS Fargate ou EC2. **Cold start** é crítico para Java e .NET; use SnapStart (Java) ou Provisioned Concurrency. **Lambda@Edge** tem limite de 5s e roda em regiões edge.
 
 ---
 
@@ -618,25 +832,78 @@ Serviço de Pub/Sub gerenciado. Mensagens são empurradas para subscribers (SQS,
 
 **Amazon CloudFront** é uma rede de entrega de conteúdo (CDN) que acelera a distribuição de conteúdo estático e dinâmico via **edge locations** globalmente.
 
+### Price Classes
+
+| Classe | Edge Locations | Custo |
+|---|---|---|
+| **Price Class All** | Todas (EUA, Europa, Ásia, América do Sul, etc.) | Mais caro |
+| **Price Class 200** | EUA + Europa + Ásia (exclui América do Sul, Austrália) | Intermediário |
+| **Price Class 100** | Apenas EUA + Europa | Mais barato |
+
 ### Origins
 
 - **S3 Bucket**: conteúdo estático, websites.
 - **Custom Origin**: ALB, EC2, servidor HTTP on-premises.
 - **AWS Media Services**: vídeo streaming.
 
-### Comportamentos e Cache
+### Regional Edge Cache
+
+- Camada adicional de cache entre a origin e as edge locations.
+- Reduz carga na origin para objetos que são menos populares globalmente.
+- **Não desabilitável** — sempre presente.
+
+### Comportamentos e Cache (Behaviors)
 
 - **Cache Policies** e **Origin Request Policies** definem o que e por quanto tempo cachear.
 - **TTL padrão**: 24h. Ajustável via headers `Cache-Control` / `Expires`.
-- **Invalidation**: remove objetos do cache das edge locations (cobrado por caminho).
-- **Signed URLs / Signed Cookies**: acesso controlado a conteúdo premium.
+- **Invalidation**: remove objetos do cache das edge locations (cobrado por caminho). Alternativa barata: usar versioned filenames (ex: `style.v2.css`).
+- **Signed URLs / Signed Cookies**: acesso controlado a conteúdo premium (Signed URLs = arquivo específico, Signed Cookies = múltiplos arquivos).
+- **Multiple origins + behaviors**: um único distribution pode rotear `/api/*` para ALB e `/*` para S3.
 
 ### Segurança
 
-- **OAC (Origin Access Control)**: restringe acesso ao S3 **apenas** via CloudFront — bucket fica privado.
+- **OAC (Origin Access Control)**: restringe acesso ao S3 **apenas** via CloudFront — bucket fica privado (substitui OAI).
 - **AWS WAF**: integrado ao CloudFront para proteção contra DDoS e ataques web.
+- **Field-Level Encryption**: criptografa campos sensíveis no POST (ex: cartão de crédito) antes de chegar à origin.
+- **Geo Restriction**: permite ou bloqueia países (whitelist/blacklist). Usa geolocalização do request.
+- **CNAMEs / SSL**: até 10 domínios customizados por distribution. SSL gratuito via ACM (Virginia) + SNI.
 
-> 🎯 **Ponto de atenção:** CloudFront reduz **custo de transferência** (egress) do S3 e melhora latência global. Use **OAC** para manter bucket privado. Use **Signed URLs** para conteúdo restrito.
+### Origin Shield
+
+- Camada de cache centralizada adicional (regional) que reduz custo de transferência da origin.
+- Útil para origins que têm muitos requests para o mesmo objeto de regiões diferentes.
+
+### Lambda@Edge
+
+- Executa funções Lambda nas edge locations para modificar requests/responses.
+- **4 eventos**: viewer-request, viewer-response, origin-request, origin-response.
+- **Limite**: 5s (viewer) / 30s (origin) de execução.
+- Casos de uso: rewrite URL, A/B testing, authentication, header injection.
+
+### Real-time Logs
+
+- Logs de acesso em tempo real para Kinesis Data Streams.
+- Útil para análise de comportamento do usuário, segurança, monitoramento.
+
+### Origin Failover
+
+- Configura origin groups com primary + secondary.
+- Se primary falhar (5xx, timeout, connection error), CloudFront automaticamente roteia para secondary.
+
+| Conceito | Descrição |
+|---|---|
+| **OAC** | Restringe S3 a apenas CloudFront |
+| **Price Classes** | Controla quais edge locations usar (custo vs performance) |
+| **Regional Edge Cache** | Cache intermediário entre edge e origin |
+| **Origin Shield** | Cache regional centralizado para reduzir custo |
+| **Lambda@Edge** | Lambda na borda para manipular requests |
+| **Field-Level Encryption** | Criptografia de campos sensíveis no POST |
+| **Geo Restriction** | Bloqueia/permite países |
+| **Origin Failover** | Redundância automática de origin |
+| **Signed URLs/Cookies** | Acesso controlado a conteúdo premium |
+| **Real-time Logs** | Logs via Kinesis Data Streams |
+
+> 🎯 **Ponto de atenção:** CloudFront reduz **custo de transferência** (egress) do S3 e melhora latência global. Use **OAC** para manter bucket privado. Use **Signed URLs** para conteúdo restrito. **Price Class 100** é o suficiente se seu público é EUA/Europa. Para invalidations frequentes, prefira **versioned filenames** (mais barato).
 
 ---
 
@@ -646,22 +913,79 @@ Serviço de Pub/Sub gerenciado. Mensagens são empurradas para subscribers (SQS,
 
 Serviço de **monitoramento e observabilidade**:
 
-- **Metrics**: métricas padrão (CPU, Network, Status Check) e customizadas.
-- **Logs**: coleta de logs de EC2, Lambda, CloudTrail, etc. Agent ou CloudWatch Logs Agent.
+- **Metrics**: métricas padrão (CPU, Network, Status Check) e customizadas (até 10 segundos de resolução).
+- **Logs**: coleta de logs de EC2, Lambda, CloudTrail, etc. via CloudWatch Agent.
 - **Alarms**: dispara ações baseadas em thresholds de métricas (ex: CPU > 80% → SNS → scaling).
-- **Dashboards**: visão consolidada de métricas em uma única página.
-- **CloudWatch Events / EventBridge**: reage a mudanças no ambiente AWS.
+- **Dashboards**: visão consolidada de métricas em uma única página (cross-region e cross-account).
+- **CloudWatch Events / EventBridge**: reage a mudanças no ambiente AWS (schedule, service events, custom events).
+
+### CloudWatch Agent
+
+- **Unified CloudWatch Agent**: coleta **métricas do OS** (CPU, memory, disk, swap) + **logs** em um único agente.
+- Substitui o antigo **CloudWatch Logs Agent** (apenas logs).
+- Suporta métricas customizadas via `procstat`, `netstat`, etc.
+
+### CloudWatch Alarms — Tipos
+
+| Tipo | Descrição |
+|---|---|
+| **Static** | Threshold fixo (CPU > 80%) |
+| **Anomaly Detection** | Threshold dinâmico baseado em aprendizado de máquina |
+| **Composite Alarm** | Combina múltiplos alarms com AND/OR (reduz noise) |
+
+### Metric Math
+
+- Permite fazer cálculos com métricas no gráfico ou alarme (`METRICS()`, `FILL()`, `SUM()`, `AVG()`, etc).
+- Exemplo: `SUM([m1, m2])` para agregar tráfego de múltiplas interfaces.
 
 ### CloudWatch Logs Insights
 
-Query SQL-like para analisar logs armazenados no CloudWatch Logs.
+- Query SQL-like para analisar logs armazenados no CloudWatch Logs.
+- Sintaxe: `fields @timestamp, @message`, `filter`, `stats count() by bin(5m)`.
+- Útil para debugging, análise de erros, performance.
+
+### Contributor Insights
+
+- Analisa **top contributors** em logs (ex: IPs que mais fazem requests, endpoints mais chamados).
+- Gera métricas baseadas em logs automaticamente.
+
+### Container Insights & Lambda Insights
+
+- **Container Insights**: métricas de ECS, EKS, Fargate (CPU, memory, network, disk aggregated).
+- **Lambda Insights**: métricas detalhadas de Lambda (cold starts, custo por invocação, duração).
 
 ### AWS CloudTrail
 
 Serviço de **auditoria** que registra todas as chamadas de API na conta AWS (console, CLI, SDK, IAM).
 
-- **Management Events**: ações de gerenciamento (CreateVPC, TerminateInstances). Habilitado por padrão, retido 90 dias.
-- **Data Events**: ações em S3 (GetObject, PutObject) e Lambda (Invoke). **Não habilitado por padrão** — precisa ser configurado.
-- **CloudTrail Insights**: detecta atividades incomuns (ex: aumento anormal de TerminateInstances).
+- **Management Events**: ações de gerenciamento (CreateVPC, TerminateInstances). Habilitado por padrão, retido 90 dias no **Event History** (gratuito).
+- **Data Events**: ações em S3 (GetObject, PutObject) e Lambda (Invoke). **Não habilitado por padrão** — precisa ser configurado. Cobrado por evento.
+- **CloudTrail Insights**: detecta atividades incomuns (ex: aumento anormal de TerminateInstances). Cobrado adicional.
+- **CloudTrail Lake**: armazena eventos em formato de dados otimizado para análise e consultas SQL. Retenção por até 7 anos.
 
-> 🎯 **Ponto de atenção:** CloudWatch = **monitoramento** (métricas, logs, alarms). CloudTrail = **auditoria** (quem fez o quê, quando, de onde). Ambos se complementam, mas são serviços diferentes.
+### Trail vs Event History
+
+| | Event History | Trail |
+|---|---|---|
+| **Cobertura** | Management events apenas | Management + Data + Insights |
+| **Retenção** | 90 dias (gratuito) | Configurável (até 7 anos no S3) |
+| **Destino** | Console AWS | S3 + CloudWatch Logs (opcional) |
+| **Custo** | Gratuito | Pago (S3 + Logs) |
+| **Multi-região** | Todas as regiões | Configurável (single ou all) |
+| **Organization Trail** | — | Trail para toda a AWS Organization |
+
+### Data Protection
+
+- **CloudTrail Log File Validation**: assinatura digital (SHA-256) dos arquivos de log — detecta alterações.
+- **KMS Encryption**: criptografa logs no S3 com chave gerenciada.
+- **CloudTrail digest files**: arquivos usados para validation de integridade (únicos por bucket).
+
+| Conceito | CloudWatch | CloudTrail |
+|---|---|---|
+| **Finalidade** | Monitoramento & observabilidade | Auditoria & compliance |
+| **Dados** | Métricas, logs, alarms | Chamadas de API |
+| **Retenção** | Logs: 1 dia a vitalício (S3 export) | Event History: 90d gratuito; Trail: até 7 anos |
+| **Insights** | Logs Insights, Contributor Insights | CloudTrail Insights |
+| **Caso típico** | "CPU está em 90%", "App está errando" | "Quem deletou o bucket?", "Quando?" |
+
+> 🎯 **Ponto de atenção:** CloudWatch = **monitoramento** (métricas, logs, alarms). CloudTrail = **auditoria** (quem fez o quê, quando, de onde). Ambos se complementam, mas são serviços diferentes. **Unified CloudWatch Agent** coleta métricas do sistema operacional (CPU, memory, disk). **CloudTrail Insights** é pago adicional — ative apenas se precisar de detecção de anomalias.
